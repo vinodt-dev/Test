@@ -1,0 +1,81 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Mvc;
+using Telerik.Windows.Documents.Fixed.Model;
+using Telerik.Windows.Documents.Fixed.Model.Editing;
+using Telerik.Windows.Documents.Fixed.Model.Editing.Tables;
+using Telerik.Windows.Documents.Fixed.Model.Fonts;
+using Telerik.Windows.Documents.Fixed.FormatProviders.Pdf;
+
+private async Task<IActionResult> ExportAdHocReportToPdf(string reportId)
+{
+    var saveResponse = await _reportComponent.GetAdhocReportDatatable(reportId, _userContext.EmployeeId);
+    
+    string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
+    
+    // Initialize PDF Document
+    RadFixedDocument document = new RadFixedDocument();
+    RadFixedPage page = document.Pages.AddPage();
+    FixedContentEditor editor = new FixedContentEditor(page);
+
+    // Define Font
+    var font = FontsRepository.Helvetica;
+    
+    // Add Header Information
+    editor.Position.Translate(50, 50);
+    editor.DrawText($"Export Date: {DateTime.Now.ToShortDateString()}", font, 12);
+    
+    editor.Position.Translate(50, 70);
+    editor.DrawText($"Report Type: Adhoc", font, 12);
+    
+    editor.Position.Translate(50, 90);
+    editor.DrawText($"Criteria: {saveResponse.ReportCriteria}", font, 12);
+
+    // Create Table for Data
+    Table table = new Table();
+    table.DefaultCellProperties.Padding = new Thickness(5);
+    
+    // Create Header Row
+    TableRow headerRow = table.Rows.AddTableRow();
+    headerRow.Background = new RgbColor(0, 0, 0); // Black background
+    headerRow.DefaultCellTextProperties.ForeColor = new RgbColor(255, 255, 255); // White text
+    
+    var headers = saveResponse.ReportFields.Split(',')
+        .Select(item => item.Trim())
+        .ToList();
+
+    foreach (var header in headers)
+    {
+        headerRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(header);
+    }
+    
+    // Add Data Rows
+    foreach (var row in saveResponse.ReportDatatable.Rows.Cast<System.Data.DataRow>())
+    {
+        TableRow dataRow = table.Rows.AddTableRow();
+        
+        foreach (var header in headers)
+        {
+            var cellValue = row[header]?.ToString() ?? "-";
+            dataRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(cellValue);
+        }
+    }
+
+    // Insert Table into PDF
+    editor.Position.Translate(50, 120);
+    editor.DrawTable(table);
+
+    // Save PDF to Stream
+    PdfFormatProvider provider = new PdfFormatProvider();
+    byte[] pdfBytes;
+    using (MemoryStream stream = new MemoryStream())
+    {
+        provider.Export(document, stream);
+        pdfBytes = stream.ToArray();
+    }
+
+    return File(pdfBytes, "application/pdf", fileName);
+}
