@@ -9,13 +9,14 @@ using Telerik.Windows.Documents.Fixed.Model.Editing;
 using Telerik.Windows.Documents.Fixed.Model.Editing.Tables;
 using Telerik.Windows.Documents.Fixed.Model.Fonts;
 using Telerik.Windows.Documents.Fixed.FormatProviders.Pdf;
+using Telerik.Windows.Documents.Primitives;
 
 private async Task<IActionResult> ExportAdHocReportToPdf(string reportId)
 {
     var saveResponse = await _reportComponent.GetAdhocReportDatatable(reportId, _userContext.EmployeeId);
-    
+
     string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
-    
+
     // Initialize PDF Document
     RadFixedDocument document = new RadFixedDocument();
     RadFixedPage page = document.Pages.AddPage();
@@ -23,50 +24,86 @@ private async Task<IActionResult> ExportAdHocReportToPdf(string reportId)
 
     // Define Font
     var font = FontsRepository.Helvetica;
-    
+
+    // Set Margins and Page Size
+    double margin = 50;
+    double maxHeight = page.Size.Height - margin * 2;
+    double yPosition = margin;
+
     // Add Header Information
-    editor.Position.Translate(50, 50);
+    editor.Position.Translate(margin, yPosition);
     editor.DrawText($"Export Date: {DateTime.Now.ToShortDateString()}", font, 12);
-    
-    editor.Position.Translate(50, 70);
+
+    yPosition += 20;
+    editor.Position.Translate(margin, yPosition);
     editor.DrawText($"Report Type: Adhoc", font, 12);
-    
-    editor.Position.Translate(50, 90);
+
+    yPosition += 20;
+    editor.Position.Translate(margin, yPosition);
     editor.DrawText($"Criteria: {saveResponse.ReportCriteria}", font, 12);
 
-    // Create Table for Data
-    Table table = new Table();
-    table.DefaultCellProperties.Padding = new Thickness(5);
-    
-    // Create Header Row
-    TableRow headerRow = table.Rows.AddTableRow();
-    headerRow.Background = new RgbColor(0, 0, 0); // Black background
-    headerRow.DefaultCellTextProperties.ForeColor = new RgbColor(255, 255, 255); // White text
-    
+    yPosition += 40; // Move down for table
+
+    // Extract Headers
     var headers = saveResponse.ReportFields.Split(',')
         .Select(item => item.Trim())
         .ToList();
 
-    foreach (var header in headers)
+    // Function to create a new page
+    void CreateNewPage()
     {
-        headerRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(header);
+        page = document.Pages.AddPage();
+        editor = new FixedContentEditor(page);
+        yPosition = margin;
+        AddTableHeaders();
     }
-    
+
+    // Function to add table headers
+    void AddTableHeaders()
+    {
+        Table table = new Table();
+        table.DefaultCellProperties.Padding = new Thickness(5);
+
+        TableRow headerRow = table.Rows.AddTableRow();
+        headerRow.Background = new RgbColor(0, 0, 0); // Black background
+        headerRow.DefaultCellTextProperties.ForeColor = new RgbColor(255, 255, 255); // White text
+
+        foreach (var header in headers)
+        {
+            headerRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(header);
+        }
+
+        editor.Position.Translate(margin, yPosition);
+        editor.DrawTable(table);
+        yPosition += table.DesiredSize.Height;
+    }
+
+    // Add First Table Header
+    AddTableHeaders();
+
     // Add Data Rows
     foreach (var row in saveResponse.ReportDatatable.Rows.Cast<System.Data.DataRow>())
     {
+        Table table = new Table();
+        table.DefaultCellProperties.Padding = new Thickness(5);
         TableRow dataRow = table.Rows.AddTableRow();
-        
+
         foreach (var header in headers)
         {
             var cellValue = row[header]?.ToString() ?? "-";
             dataRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(cellValue);
         }
-    }
 
-    // Insert Table into PDF
-    editor.Position.Translate(50, 120);
-    editor.DrawTable(table);
+        // Check if table height exceeds page
+        if (yPosition + table.DesiredSize.Height > maxHeight)
+        {
+            CreateNewPage();
+        }
+
+        editor.Position.Translate(margin, yPosition);
+        editor.DrawTable(table);
+        yPosition += table.DesiredSize.Height;
+    }
 
     // Save PDF to Stream
     PdfFormatProvider provider = new PdfFormatProvider();
