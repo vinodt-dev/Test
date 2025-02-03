@@ -1,73 +1,119 @@
+using Microsoft.AspNetCore.Mvc;
+using System.Text;
+using System.Threading.Tasks;
+using Telerik.Reporting;
+using Telerik.Reporting.Processing;
+using System.Linq;
+using System;
+
+public class ReportController : ControllerBase
 {
-    var saveResponse = await _reportComponent.GetAdhocReportDatatable(reportId, _userContext.EmployeeId);
+    private readonly IReportComponent _reportComponent;
+    private readonly IUserContext _userContext;
 
-    string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
-
-    // Build HTML content for the report
-    StringBuilder htmlContent = new StringBuilder();
-
-    // Add CSS styles for the report table and other formatting
-    htmlContent.AppendLine("<html>");
-    htmlContent.AppendLine("<head>");
-    htmlContent.AppendLine("<style>");
-    htmlContent.AppendLine("body { font-family: Helvetica, Arial, sans-serif; font-size: 12px; }");
-    htmlContent.AppendLine("table { width: 100%; border-collapse: collapse; margin-top: 20px; }");
-    htmlContent.AppendLine("th, td { padding: 8px; text-align: center; border: 1px solid #000; }");
-    htmlContent.AppendLine("th { background-color: #000; color: #fff; font-size: 14px; }");
-    htmlContent.AppendLine("</style>");
-    htmlContent.AppendLine("</head>");
-    htmlContent.AppendLine("<body>");
-
-    // Add Header Information
-    htmlContent.AppendLine("<p><strong>Export Date:</strong> " + DateTime.Now.ToShortDateString() + "</p>");
-    htmlContent.AppendLine("<p><strong>Report Type:</strong> Adhoc</p>");
-    htmlContent.AppendLine("<p><strong>Criteria:</strong> " + saveResponse.ReportCriteria + "</p>");
-
-    // Add Table
-    htmlContent.AppendLine("<table>");
-
-    // Extract Headers
-    var headers = saveResponse.ReportFields.Split(',')
-        .Select(item => item.Trim())
-        .ToList();
-
-    // Add table headers
-    htmlContent.AppendLine("<tr>");
-    foreach (var header in headers)
+    public ReportController(IReportComponent reportComponent, IUserContext userContext)
     {
-        htmlContent.AppendLine($"<th>{header}</th>");
+        _reportComponent = reportComponent;
+        _userContext = userContext;
     }
-    htmlContent.AppendLine("</tr>");
 
-    // Add Data Rows
-    foreach (var row in saveResponse.ReportDatatable.Rows.Cast<System.Data.DataRow>())
+    [HttpGet("generate-report/{reportId}")]
+    public async Task<IActionResult> GenerateAdhocReportPdf(int reportId)
     {
-        htmlContent.AppendLine("<tr>");
+        // Fetch report data (this is a placeholder for your actual data retrieval logic)
+        var saveResponse = await _reportComponent.GetAdhocReportDatatable(reportId, _userContext.EmployeeId);
+
+        // Set the file name with a timestamp
+        string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
+
+        // Create a Telerik Report instance
+        var report = new Telerik.Reporting.Report();
+
+        // Create an ObjectDataSource to bind the DataTable (from your saveResponse) to the report
+        var dataSource = new Telerik.Reporting.ObjectDataSource
+        {
+            DataSource = saveResponse.ReportDatatable
+        };
+
+        // Assign the data source to the report
+        report.DataSource = dataSource;
+
+        // Create a Table for displaying the data in the report
+        var table = new Telerik.Reporting.Table
+        {
+            DataSource = dataSource
+        };
+
+        // Extract headers (assuming saveResponse.ReportFields contains the headers in a comma-separated format)
+        var headers = saveResponse.ReportFields.Split(',')
+            .Select(item => item.Trim())
+            .ToList();
+
+        // Add additional header row for Export Date and Report Type
+        var headerRow = new Telerik.Reporting.TableRow();
+
+        // Add "Export Date" header
+        var exportDateCell = new Telerik.Reporting.TableCell
+        {
+            Value = "Export Date: " + DateTime.Now.ToShortDateString(),
+            ColSpan = headers.Count // span across all columns
+        };
+        exportDateCell.Style.BackgroundColor = System.Drawing.Color.Gray;
+        exportDateCell.Style.Color = System.Drawing.Color.White;
+        exportDateCell.Style.Font.Bold = true;
+        headerRow.Cells.Add(exportDateCell);
+
+        // Add "Report Type" header
+        var reportTypeCell = new Telerik.Reporting.TableCell
+        {
+            Value = "Report Type: Adhoc",
+            ColSpan = headers.Count // span across all columns
+        };
+        reportTypeCell.Style.BackgroundColor = System.Drawing.Color.Gray;
+        reportTypeCell.Style.Color = System.Drawing.Color.White;
+        reportTypeCell.Style.Font.Bold = true;
+        headerRow.Cells.Add(reportTypeCell);
+
+        table.Body.Rows.Add(headerRow);
+
+        // Add another row for column headers
+        var columnHeaderRow = new Telerik.Reporting.TableRow();
         foreach (var header in headers)
         {
-            var cellValue = row[header]?.ToString() ?? "-";
-            htmlContent.AppendLine($"<td>{cellValue}</td>");
+            var headerCell = new Telerik.Reporting.TableCell
+            {
+                Value = header
+            };
+            headerCell.Style.BackgroundColor = System.Drawing.Color.Black;
+            headerCell.Style.Color = System.Drawing.Color.White;
+            headerCell.Style.Font.Bold = true;
+            columnHeaderRow.Cells.Add(headerCell);
         }
-        htmlContent.AppendLine("</tr>");
+        table.Body.Rows.Add(columnHeaderRow);
+
+        // Add data rows dynamically
+        foreach (var row in saveResponse.ReportDatatable.Rows.Cast<System.Data.DataRow>())
+        {
+            var dataRow = new Telerik.Reporting.TableRow();
+            foreach (var header in headers)
+            {
+                var dataCell = new Telerik.Reporting.TableCell
+                {
+                    Value = row[header]?.ToString() ?? "-"
+                };
+                dataRow.Cells.Add(dataCell);
+            }
+            table.Body.Rows.Add(dataRow);
+        }
+
+        // Add the table to the report's Items collection
+        report.Items.Add(table);
+
+        // Initialize the Report Processor to render the report
+        var reportProcessor = new ReportProcessor();
+        var result = reportProcessor.RenderReport("PDF", report, null);
+
+        // Return the generated PDF as a downloadable file
+        return File(result.DocumentBytes, "application/pdf", fileName);
     }
-
-    // Close the table and body
-    htmlContent.AppendLine("</table>");
-    htmlContent.AppendLine("</body>");
-    htmlContent.AppendLine("</html>");
-
-    // Convert HTML to PDF using Telerik's HtmlFormatProvider
-    HtmlFormatProvider provider = new HtmlFormatProvider();
-    RadFixedDocument document = provider.Import(htmlContent.ToString());
-
-    // Save PDF to Stream
-    PdfFormatProvider pdfProvider = new PdfFormatProvider();
-    byte[] pdfBytes;
-    using (MemoryStream stream = new MemoryStream())
-    {
-        pdfProvider.Export(document, stream);
-        pdfBytes = stream.ToArray();
-    }
-
-    return File(pdfBytes, "application/pdf", fileName);
 }
