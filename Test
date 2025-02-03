@@ -1,116 +1,71 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Mvc;
-using Telerik.Windows.Documents.Fixed.Model;
-using Telerik.Windows.Documents.Fixed.Model.Editing;
-using Telerik.Windows.Documents.Fixed.Model.Editing.Tables;
-using Telerik.Windows.Documents.Fixed.Model.Fonts;
-using Telerik.Windows.Documents.Fixed.FormatProviders.Pdf;
-using Telerik.Windows.Documents.Primitives;
-
-private async Task<IActionResult> ExportAdHocReportToPdf(string reportId)
 {
     var saveResponse = await _reportComponent.GetAdhocReportDatatable(reportId, _userContext.EmployeeId);
 
     string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
 
-    // Initialize PDF Document
-    RadFixedDocument document = new RadFixedDocument();
-    RadFixedPage page = document.Pages.AddPage();
-    FixedContentEditor editor = new FixedContentEditor(page);
+    // Build HTML content for the report
+    StringBuilder htmlContent = new StringBuilder();
 
-    // Define Font
-    var font = FontsRepository.Helvetica;
-
-    // Set Margins and Page Size
-    double margin = 50;
-    double maxHeight = page.Size.Height - margin * 2;
-    double yPosition = margin;
+    // Add CSS styles for the report table and other formatting
+    htmlContent.AppendLine("<html>");
+    htmlContent.AppendLine("<head>");
+    htmlContent.AppendLine("<style>");
+    htmlContent.AppendLine("body { font-family: Helvetica, Arial, sans-serif; font-size: 12px; }");
+    htmlContent.AppendLine("table { width: 100%; border-collapse: collapse; margin-top: 20px; }");
+    htmlContent.AppendLine("th, td { padding: 8px; text-align: center; border: 1px solid #000; }");
+    htmlContent.AppendLine("th { background-color: #000; color: #fff; font-size: 14px; }");
+    htmlContent.AppendLine("</style>");
+    htmlContent.AppendLine("</head>");
+    htmlContent.AppendLine("<body>");
 
     // Add Header Information
-    editor.Position.Translate(margin, yPosition);
-    editor.DrawText($"Export Date: {DateTime.Now.ToShortDateString()}", font, 12);
+    htmlContent.AppendLine("<p><strong>Export Date:</strong> " + DateTime.Now.ToShortDateString() + "</p>");
+    htmlContent.AppendLine("<p><strong>Report Type:</strong> Adhoc</p>");
+    htmlContent.AppendLine("<p><strong>Criteria:</strong> " + saveResponse.ReportCriteria + "</p>");
 
-    yPosition += 20;
-    editor.Position.Translate(margin, yPosition);
-    editor.DrawText($"Report Type: Adhoc", font, 12);
-
-    yPosition += 20;
-    editor.Position.Translate(margin, yPosition);
-    editor.DrawText($"Criteria: {saveResponse.ReportCriteria}", font, 12);
-
-    yPosition += 40; // Move down for table
+    // Add Table
+    htmlContent.AppendLine("<table>");
 
     // Extract Headers
     var headers = saveResponse.ReportFields.Split(',')
         .Select(item => item.Trim())
         .ToList();
 
-    // Function to create a new page
-    void CreateNewPage()
+    // Add table headers
+    htmlContent.AppendLine("<tr>");
+    foreach (var header in headers)
     {
-        page = document.Pages.AddPage();
-        editor = new FixedContentEditor(page);
-        yPosition = margin;
-        AddTableHeaders();
+        htmlContent.AppendLine($"<th>{header}</th>");
     }
-
-    // Function to add table headers
-    void AddTableHeaders()
-    {
-        Table table = new Table();
-        table.DefaultCellProperties.Padding = new Thickness(5);
-
-        TableRow headerRow = table.Rows.AddTableRow();
-        headerRow.Background = new RgbColor(0, 0, 0); // Black background
-        headerRow.DefaultCellTextProperties.ForeColor = new RgbColor(255, 255, 255); // White text
-
-        foreach (var header in headers)
-        {
-            headerRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(header);
-        }
-
-        editor.Position.Translate(margin, yPosition);
-        editor.DrawTable(table);
-        yPosition += table.DesiredSize.Height;
-    }
-
-    // Add First Table Header
-    AddTableHeaders();
+    htmlContent.AppendLine("</tr>");
 
     // Add Data Rows
     foreach (var row in saveResponse.ReportDatatable.Rows.Cast<System.Data.DataRow>())
     {
-        Table table = new Table();
-        table.DefaultCellProperties.Padding = new Thickness(5);
-        TableRow dataRow = table.Rows.AddTableRow();
-
+        htmlContent.AppendLine("<tr>");
         foreach (var header in headers)
         {
             var cellValue = row[header]?.ToString() ?? "-";
-            dataRow.Cells.AddTableCell().Blocks.AddBlock().InsertText(cellValue);
+            htmlContent.AppendLine($"<td>{cellValue}</td>");
         }
-
-        // Check if table height exceeds page
-        if (yPosition + table.DesiredSize.Height > maxHeight)
-        {
-            CreateNewPage();
-        }
-
-        editor.Position.Translate(margin, yPosition);
-        editor.DrawTable(table);
-        yPosition += table.DesiredSize.Height;
+        htmlContent.AppendLine("</tr>");
     }
 
+    // Close the table and body
+    htmlContent.AppendLine("</table>");
+    htmlContent.AppendLine("</body>");
+    htmlContent.AppendLine("</html>");
+
+    // Convert HTML to PDF using Telerik's HtmlFormatProvider
+    HtmlFormatProvider provider = new HtmlFormatProvider();
+    RadFixedDocument document = provider.Import(htmlContent.ToString());
+
     // Save PDF to Stream
-    PdfFormatProvider provider = new PdfFormatProvider();
+    PdfFormatProvider pdfProvider = new PdfFormatProvider();
     byte[] pdfBytes;
     using (MemoryStream stream = new MemoryStream())
     {
-        provider.Export(document, stream);
+        pdfProvider.Export(document, stream);
         pdfBytes = stream.ToArray();
     }
 
