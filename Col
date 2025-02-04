@@ -1,0 +1,30 @@
+// Add data rows
+    bool isAlternateRow = false; // Track for alternating row colors
+    foreach (var data in saveResponse.ReportDatatable.AsEnumerable())
+    {
+        Table dataTable = new Table();
+        Border border = new Border(1, BorderStyle.Single, new RgbColor(0, 0, 0));
+        dataTable.DefaultCellProperties.Borders = new TableCellBorders(border, border, border, border);
+        dataTable.DefaultCellProperties.Padding = new Thickness(10);
+
+        TableRow dataRow = dataTable.Rows.AddTableRow();
+        dataRow.Background = isAlternateRow ? new RgbColor(240, 240, 240) : new RgbColor(255, 255, 255);
+        isAlternateRow = !isAlternateRow;
+
+        foreach (var header in headers)
+        {
+            var cellValue = data[header]?.ToString() ?? "-"; // Fetch value dynamically
+            TableCell cell = dataRow.Cells.AddTableCell();
+            cell.Blocks.AddBlock().InsertText(cellValue);
+            cell.Properties.SetColumnWidth(columnWidth); // Match header column width
+        }
+
+        // Check if the table height exceeds the page height
+        if (yPosition + dataTable.DesiredSize.Height > pageSize.Height - margin)
+        {
+            CreateNewPage(); // Add a new page
+        }
+
+        editor.Position.Translate(margin, yPosition);
+        editor.DrawTable(dataTable, new Size(tableWidth, double.PositiveInfinity));
+        yPosition += dataTable.DesiredSize.Height;
