@@ -1,30 +1,53 @@
-// Add data rows
-    bool isAlternateRow = false; // Track for alternating row colors
-    foreach (var data in saveResponse.ReportDatatable.AsEnumerable())
+public void ExportAdHocReportToPdf(AdHocReportResponse response, string outputFilePath)
+{
+    var headers = GetHeaders(response.ReportFields);
+    var pageSize = GetPageSize(headers.Count);
+
+    var document = new RadFixedDocument();
+    var page = document.Pages.AddPage();
+    page.Size = pageSize;
+
+    var editor = new FixedContentEditor(page);
+    var font = FontsRepository.Helvetica;
+
+    double margin = 50;
+    double maxHeight = pageSize.Height - margin * 2;
+    double maxWidth = pageSize.Width - margin * 2;
+    double yPosition = margin;
+
+    // ✅ Add headers only once at the beginning
+    AddHeaderInfo(editor, font, margin, ref yPosition, response.ReportCriteria);
+    AddTableHeaders(editor, headers, margin, maxWidth, ref yPosition);
+
+    bool isAlternateRow = false;
+    int rowCount = 0;
+    int maxRowsPerPage = (int)(maxHeight / 20); // Estimated number of rows per page
+
+    // ✅ Use streaming approach - Process data in chunks
+    foreach (var dataChunk in response.ReportDatatable.AsEnumerable().Chunk(1000)) // Process 1000 rows at a time
     {
-        Table dataTable = new Table();
-        Border border = new Border(1, BorderStyle.Single, new RgbColor(0, 0, 0));
-        dataTable.DefaultCellProperties.Borders = new TableCellBorders(border, border, border, border);
-        dataTable.DefaultCellProperties.Padding = new Thickness(10);
-
-        TableRow dataRow = dataTable.Rows.AddTableRow();
-        dataRow.Background = isAlternateRow ? new RgbColor(240, 240, 240) : new RgbColor(255, 255, 255);
-        isAlternateRow = !isAlternateRow;
-
-        foreach (var header in headers)
+        foreach (var data in dataChunk)
         {
-            var cellValue = data[header]?.ToString() ?? "-"; // Fetch value dynamically
-            TableCell cell = dataRow.Cells.AddTableCell();
-            cell.Blocks.AddBlock().InsertText(cellValue);
-            cell.Properties.SetColumnWidth(columnWidth); // Match header column width
+            double rowHeight = AddDataRow(editor, headers, data, margin, maxWidth, ref isAlternateRow, ref yPosition);
+            rowCount++;
+
+            // ✅ Create a new page when necessary
+            if (rowCount >= maxRowsPerPage || yPosition + rowHeight > maxHeight)
+            {
+                rowCount = 0; // Reset row count
+                CreateNewPage(document, pageSize, ref editor, margin, headers, maxWidth, ref yPosition);
+            }
         }
 
-        // Check if the table height exceeds the page height
-        if (yPosition + dataTable.DesiredSize.Height > pageSize.Height - margin)
-        {
-            CreateNewPage(); // Add a new page
-        }
+        // ✅ Clear memory after processing a chunk
+        GC.Collect();
+    }
 
-        editor.Position.Translate(margin, yPosition);
-        editor.DrawTable(dataTable, new Size(tableWidth, double.PositiveInfinity));
-        yPosition += dataTable.DesiredSize.Height;
+    // ✅ Add footers only once
+    AddFooters(document, margin);
+
+    // ✅ Use FileStream instead of MemoryStream for large files
+    using var stream = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write);
+    var provider = new PdfFormatProvider();
+    provider.Export(document, stream);
+}
