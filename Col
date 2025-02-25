@@ -1,12 +1,10 @@
-public void ExportAdHocReportToPdf(AdHocReportResponse response, string outputFilePath)
+public byte[] ExportAdHocReportToPdf(AdHocReportResponse response)
 {
     var headers = GetHeaders(response.ReportFields);
     var pageSize = GetPageSize(headers.Count);
-
-    var document = new RadFixedDocument();
+    
+    var document = new RadFixedDocument(); // ✅ Holds the entire document in memory
     var page = document.Pages.AddPage();
-    page.Size = pageSize;
-
     var editor = new FixedContentEditor(page);
     var font = FontsRepository.Helvetica;
 
@@ -15,39 +13,39 @@ public void ExportAdHocReportToPdf(AdHocReportResponse response, string outputFi
     double maxWidth = pageSize.Width - margin * 2;
     double yPosition = margin;
 
-    // ✅ Add headers only once at the beginning
+    // ✅ Add header information (Optimized)
     AddHeaderInfo(editor, font, margin, ref yPosition, response.ReportCriteria);
+
+    // ✅ Add table headers
     AddTableHeaders(editor, headers, margin, maxWidth, ref yPosition);
 
     bool isAlternateRow = false;
-    int rowCount = 0;
-    int maxRowsPerPage = (int)(maxHeight / 20); // Estimated number of rows per page
 
-    // ✅ Use streaming approach - Process data in chunks
-    foreach (var dataChunk in response.ReportDatatable.AsEnumerable().Chunk(1000)) // Process 1000 rows at a time
+    // ✅ Iterate directly over DataTable.Rows (avoids unnecessary List allocation)
+    foreach (DataRow data in response.ReportDatatable.Rows)
     {
-        foreach (var data in dataChunk)
+        double rowHeight = AddDataRow(editor, headers, data, margin, maxWidth, ref isAlternateRow, ref yPosition);
+
+        // ✅ Create new page when needed
+        if (yPosition + rowHeight > maxHeight)
         {
-            double rowHeight = AddDataRow(editor, headers, data, margin, maxWidth, ref isAlternateRow, ref yPosition);
-            rowCount++;
-
-            // ✅ Create a new page when necessary
-            if (rowCount >= maxRowsPerPage || yPosition + rowHeight > maxHeight)
-            {
-                rowCount = 0; // Reset row count
-                CreateNewPage(document, pageSize, ref editor, margin, headers, maxWidth, ref yPosition);
-            }
+            page = document.Pages.AddPage();
+            editor = new FixedContentEditor(page);
+            yPosition = margin;
+            AddTableHeaders(editor, headers, margin, maxWidth, ref yPosition);
         }
-
-        // ✅ Clear memory after processing a chunk
-        GC.Collect();
     }
 
-    // ✅ Add footers only once
+    // ✅ Add footers
     AddFooters(document, margin);
 
-    // ✅ Use FileStream instead of MemoryStream for large files
-    using var stream = new FileStream(outputFilePath, FileMode.Create, FileAccess.Write);
-    var provider = new PdfFormatProvider();
-    provider.Export(document, stream);
+    // ✅ Optimize MemoryStream usage
+    using (var stream = new MemoryStream(4096)) // Pre-allocate size to avoid multiple resizes
+    {
+        var provider = new PdfFormatProvider();
+        provider.Export(document, stream);
+        document = null; // ✅ Release memory reference of the document immediately
+        GC.Collect(); // ✅ Force garbage collection to clean up unused objects
+        return stream.ToArray(); // ✅ Return byte array of PDF
+    }
 }
