@@ -1,63 +1,46 @@
-public async Task<IActionResult> ExportAdHocReportToPdf(AdHocReportResponse response)
+public async Task<IActionResult> ExportAdHocReportToPdf(string reportId)
 {
+    byte[] pdfBytes = await GeneratePdfWithPdfSharp(reportId);
     string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
-    string filePath = Path.Combine(Path.GetTempPath(), fileName);
-
-    using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
-    {
-        await GeneratePdf(response, fileStream);
-    }
-
-    return PhysicalFile(filePath, "application/pdf", fileName);
+    return File(pdfBytes, "application/pdf", fileName);
 }
 
-private async Task GeneratePdf(AdHocReportResponse response, Stream outputStream)
+private async Task<byte[]> GeneratePdfWithPdfSharp(string reportId)
 {
+    var response = _reportComponent.GetReportData(reportId);
     var headers = GetHeaders(response.ReportFields);
-    var pageSize = GetPageSize(headers.Count);
 
-    using (var provider = new PdfFormatProvider())
-    using (var document = new RadFixedDocument())
+    using var document = new PdfDocument();
+    var page = document.AddPage();
+    var gfx = XGraphics.FromPdfPage(page);
+    var font = new XFont("Arial", 12, XFontStyle.Bold);
+
+    double yPosition = 50;
+
+    // ✅ Add Header
+    gfx.DrawString("AdHoc Report", font, XBrushes.Black, new XPoint(50, yPosition));
+    yPosition += 20;
+
+    // ✅ Add Table Headers
+    foreach (var header in headers)
     {
-        double margin = 20; // ✅ Smaller margin for more space
-        double yPosition = margin;
-        double maxWidth = pageSize.Width - (margin * 2);
-        double maxHeight = pageSize.Height - (margin * 2);
-        double rowHeight = 12; // ✅ Reduced row height for more rows per page
-
-        var font = FontsRepository.Helvetica;
-        
-        var page = document.Pages.AddPage();
-        page.Size = pageSize;
-        var editor = new FixedContentEditor(page);
-
-        AddHeaderInfo(editor, font, margin, ref yPosition, response.ReportCriteria);
-        AddTableHeaders(editor, headers, margin, maxWidth, ref yPosition);
-
-        bool isAlternateRow = false;
-        int batchSize = 1000; // ✅ Process records in batches to reduce memory usage
-        
-        foreach (var batch in response.ReportDatatable.Rows.Batch(batchSize))
-        {
-            foreach (DataRow data in batch)
-            {
-                if (yPosition + rowHeight > maxHeight) // ✅ Efficiently handles new pages
-                {
-                    page = document.Pages.AddPage();
-                    page.Size = pageSize;
-                    editor = new FixedContentEditor(page);
-                    yPosition = margin;
-                    AddTableHeaders(editor, headers, margin, maxWidth, ref yPosition);
-                }
-
-                AddDataRow(editor, headers, data, margin, maxWidth, ref isAlternateRow, ref yPosition);
-            }
-
-            provider.Export(document, outputStream);
-            document.Pages.Clear(); // ✅ Free memory after batch processing
-        }
-
-        AddFooters(document, margin);
-        provider.Export(document, outputStream);
+        gfx.DrawString(header, font, XBrushes.Black, new XPoint(50, yPosition));
+        yPosition += 20;
     }
+
+    // ✅ Add Table Data
+    var dataFont = new XFont("Arial", 10);
+    foreach (DataRow row in response.ReportDatatable.Rows)
+    {
+        foreach (var header in headers)
+        {
+            gfx.DrawString(row[header]?.ToString() ?? "", dataFont, XBrushes.Black, new XPoint(50, yPosition));
+        }
+        yPosition += 20;
+    }
+
+    // ✅ Save to MemoryStream instead of FileStream
+    using var stream = new MemoryStream();
+    document.Save(stream);
+    return stream.ToArray();
 }
