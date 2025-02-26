@@ -1,46 +1,63 @@
-public async Task<IActionResult> ExportAdHocReportToPdf(string reportId)
-{
-    byte[] pdfBytes = await GeneratePdfWithPdfSharp(reportId);
-    string fileName = $"AdHocReport_{DateTime.Now:yyyy-MM-dd_HH-mm-ss-fff}.pdf";
-    return File(pdfBytes, "application/pdf", fileName);
-}
-
 private async Task<byte[]> GeneratePdfWithPdfSharp(string reportId)
 {
     var response = _reportComponent.GetReportData(reportId);
     var headers = GetHeaders(response.ReportFields);
 
     using var document = new PdfDocument();
+    
+    // ✅ Determine Page Size Dynamically Based on Column Count
+    var pageSize = GetDynamicPageSize(headers.Count);
     var page = document.AddPage();
+    page.Width = pageSize.Width;
+    page.Height = pageSize.Height;
+
     var gfx = XGraphics.FromPdfPage(page);
     var font = new XFont("Arial", 12, XFontStyle.Bold);
+    var dataFont = new XFont("Arial", 10);
 
-    double yPosition = 50;
+    double margin = 40;
+    double yPosition = margin;
+    double xStart = margin;
+    double columnWidth = (page.Width - 2 * margin) / headers.Count;
+    double rowHeight = 20;
 
-    // ✅ Add Header
-    gfx.DrawString("AdHoc Report", font, XBrushes.Black, new XPoint(50, yPosition));
-    yPosition += 20;
-
-    // ✅ Add Table Headers
+    // ✅ Draw Table Headers
     foreach (var header in headers)
     {
-        gfx.DrawString(header, font, XBrushes.Black, new XPoint(50, yPosition));
-        yPosition += 20;
+        gfx.DrawRectangle(XBrushes.LightGray, xStart, yPosition, columnWidth, rowHeight);
+        gfx.DrawString(header, font, XBrushes.Black, new XPoint(xStart + 5, yPosition + 15));
+        xStart += columnWidth;
     }
+    yPosition += rowHeight;
 
-    // ✅ Add Table Data
-    var dataFont = new XFont("Arial", 10);
+    // ✅ Draw Table Data (Row by Row)
     foreach (DataRow row in response.ReportDatatable.Rows)
     {
+        xStart = margin; // Reset for each row
         foreach (var header in headers)
         {
-            gfx.DrawString(row[header]?.ToString() ?? "", dataFont, XBrushes.Black, new XPoint(50, yPosition));
+            gfx.DrawRectangle(XBrushes.White, xStart, yPosition, columnWidth, rowHeight);
+            gfx.DrawString(row[header]?.ToString() ?? "", dataFont, XBrushes.Black, new XPoint(xStart + 5, yPosition + 15));
+            xStart += columnWidth;
         }
-        yPosition += 20;
+
+        yPosition += rowHeight;
+
+        // ✅ Add New Page if Needed
+        if (yPosition + rowHeight > page.Height - margin)
+        {
+            page = document.AddPage();
+            page.Width = pageSize.Width;
+            page.Height = pageSize.Height;
+            gfx = XGraphics.FromPdfPage(page);
+            yPosition = margin;
+        }
     }
 
-    // ✅ Save to MemoryStream instead of FileStream
+    // ✅ Save to MemoryStream & Return as Byte Array
     using var stream = new MemoryStream();
     document.Save(stream);
     return stream.ToArray();
 }
+
+// ✅ Dynamic Page Sizing Based on Column Count
